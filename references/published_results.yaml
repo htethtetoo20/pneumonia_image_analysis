@@ -1,0 +1,72 @@
+# Published results on the Kermany chest_xray dataset, for context alongside ours.
+#
+# Read the `split` field before comparing anything. Most published work on this
+# dataset does NOT evaluate on the official 624-image test folder -- it pools all
+# ~5,856 images and takes its own random split, usually without grouping by
+# patient. That inflates scores relative to the official split in two ways: a
+# larger, easier test sample, and the same child appearing on both sides.
+#
+# So a higher number in this file is not necessarily a better model. Entries are
+# annotated with what is and is not comparable.
+
+results:
+  - id: kermany2018
+    authors: "Kermany et al."
+    year: 2018
+    venue: "Cell 172(5)"
+    url: "https://www.cell.com/cell/fulltext/S0092-8674(18)30154-5"
+    note: >-
+      The paper that introduced this dataset. Uses the official held-out test
+      set, so this is the most directly comparable entry here. Inception V3,
+      transfer learning from ImageNet.
+    tasks:
+      binary:
+        accuracy: 0.928
+        split: "official test set (624 images)"
+        comparable: true
+      subtype:
+        accuracy: 0.907
+        split: "official test set, bacterial vs viral only (2-way, not 3-way)"
+        comparable: false
+        why: >-
+          A 2-way bacterial-vs-viral task, easier than our 3-way problem
+          because NORMAL is excluded -- and NORMAL/VIRAL is where most of our
+          error lives.
+
+  - id: rahman2020
+    authors: "Rahman et al."
+    year: 2020
+    venue: "Applied Sciences 10(9), 3233"
+    url: "https://arxiv.org/abs/2004.06578"
+    note: >-
+      Widely cited transfer-learning benchmark (AlexNet, ResNet18,
+      DenseNet201, SqueezeNet). Reports all three schemes, which makes it the
+      closest published match to this project's tasks.
+    tasks:
+      binary:
+        accuracy: 0.98
+        split: "own random split of 5,247 images"
+        comparable: false
+        why: >-
+          Not the official test folder, and no patient grouping is described,
+          so some of the margin over Kermany's 0.928 on the same data is
+          likely split difference rather than model quality.
+      subtype:
+        accuracy: 0.933
+        split: "own random split of 5,247 images, 3-class"
+        comparable: false
+        why: "Same split caveat as above."
+      bacterial_vs_viral:
+        accuracy: 0.95
+        split: "own random split, 2-way"
+        comparable: false
+        why: "2-way task and non-official split."
+
+# What this project reports, for the script to line up against the above.
+ours:
+  binary:
+    metrics_path: "artifacts/metrics_test.json"
+    label: "ResNet50, patient-grouped split"
+  subtype:
+    metrics_path: "artifacts/subtype/metrics_test.json"
+    label: "ResNet50, patient-grouped split"
