@@ -4,14 +4,19 @@
 from __future__ import annotations
 
 import argparse
-import random
 import shutil
+import sys
 from pathlib import Path
 
 import kagglehub
 
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+
+from cxr_pneumonia.subtype import hold_out_patients, patient_id
 
 DATASET = "paultimothymooney/chest-xray-pneumonia"
+IMAGE_SUFFIXES = {".jpeg", ".jpg", ".png"}
 
 
 def find_chest_xray_root(download_root: Path) -> Path:
@@ -29,42 +34,45 @@ def find_chest_xray_root(download_root: Path) -> Path:
 
 
 def count_images(directory: Path) -> int:
-    return sum(1 for p in directory.rglob("*") if p.suffix.lower() in {".jpeg", ".jpg", ".png"})
+    return sum(1 for p in directory.rglob("*") if p.suffix.lower() in IMAGE_SUFFIXES)
 
 
 def rebuild_validation(dest: Path, val_fraction: float = 0.1, seed: int = 42) -> None:
     """
-    The Kaggle val split is tiny (16 images). Move a stratified fraction of
-    train into val so early stopping / model selection is meaningful.
-    Test split is left untouched.
+    Carve a real validation set out of train (the official one is 16 images).
+
+    Grouped by patient: splitting by image put 272 children on both sides of
+    the boundary, so early stopping was selecting on data it had already seen.
+    Folds any existing val back into train first, so re-running with a
+    different fraction/seed is safe. Test split is never touched.
     """
     train_dir = dest / "train"
     val_dir = dest / "val"
-    if count_images(val_dir) >= 100:
-        return
 
-    rng = random.Random(seed)
-    # Move existing tiny val images back into train first
-    for cls_dir in val_dir.iterdir():
-        if not cls_dir.is_dir():
-            continue
-        target = train_dir / cls_dir.name
-        target.mkdir(parents=True, exist_ok=True)
-        for img in cls_dir.iterdir():
-            if img.is_file():
-                shutil.move(str(img), str(target / img.name))
+    # Recompute from the full pool each time, rather than layering on a previous split.
+    if val_dir.is_dir():
+        for cls_dir in sorted(p for p in val_dir.iterdir() if p.is_dir()):
+            target = train_dir / cls_dir.name
+            target.mkdir(parents=True, exist_ok=True)
+            for img in cls_dir.iterdir():
+                if img.is_file():
+                    shutil.move(str(img), str(target / img.name))
 
+    class_of = {}
+    pool = []
     for cls_dir in sorted(p for p in train_dir.iterdir() if p.is_dir()):
-        images = [
-            p for p in cls_dir.iterdir() if p.suffix.lower() in {".jpeg", ".jpg", ".png"}
-        ]
-        rng.shuffle(images)
-        n_val = max(1, int(len(images) * val_fraction))
-        val_cls = val_dir / cls_dir.name
+        for img in sorted(cls_dir.iterdir()):
+            if img.suffix.lower() in IMAGE_SUFFIXES:
+                pool.append(img)
+                class_of[img] = cls_dir.name
+
+    val_images = hold_out_patients(pool, val_fraction, seed, stratum_of=class_of.__getitem__)
+    for img in sorted(val_images):
+        val_cls = val_dir / class_of[img]
         val_cls.mkdir(parents=True, exist_ok=True)
-        for img in images[:n_val]:
-            shutil.move(str(img), str(val_cls / img.name))
-    print(f"Rebuilt validation set (~{val_fraction:.0%} stratified from train).")
+        shutil.move(str(img), str(val_cls / img.name))
+
+    print(f"Rebuilt validation set (~{val_fraction:.0%} of train, split by patient).")
 
 
 def print_counts(dest: Path) -> None:
@@ -77,9 +85,25 @@ def print_counts(dest: Path) -> None:
             n = sum(
                 1
                 for p in (split_dir / cls).iterdir()
-                if p.suffix.lower() in {".jpeg", ".jpg", ".png"}
+                if p.suffix.lower() in IMAGE_SUFFIXES
             )
             print(f"  {split}/{cls}: {n} images")
+
+
+def check_no_leakage(dest: Path) -> None:
+    """Fail loudly if any patient has images in both train and val."""
+    def patients(split: str) -> set[str]:
+        split_dir = dest / split
+        return {
+            patient_id(p)
+            for p in split_dir.rglob("*")
+            if p.suffix.lower() in IMAGE_SUFFIXES and p.is_file()
+        }
+
+    overlap = patients("train") & patients("val")
+    print(f"  train/val patient overlap: {len(overlap)}")
+    if overlap:
+        raise SystemExit("Patient leakage between train and val -- split is broken.")
 
 
 def main() -> None:
@@ -99,17 +123,30 @@ def main() -> None:
         "--val-fraction",
         type=float,
         default=0.1,
-        help="Fraction of train moved into val when official val is tiny",
+        help="Fraction of train held out as val",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        help="Seed for the patient-grouped validation split",
+    )
+    parser.add_argument(
+        "--resplit",
+        action="store_true",
+        help="Redo the train/val split on data already on disk (no re-download)",
     )
     args = parser.parse_args()
 
     dest: Path = args.dest
     if (dest / "train").is_dir() and not args.force:
         print(f"Dataset already present at {dest.resolve()}")
-        if count_images(dest / "val") < 100:
-            rebuild_validation(dest, val_fraction=args.val_fraction)
+        if args.resplit or count_images(dest / "val") < 100:
+            rebuild_validation(dest, val_fraction=args.val_fraction, seed=args.seed)
             print_counts(dest)
-        print("Use --force to re-download/copy.")
+            check_no_leakage(dest)
+        else:
+            print("Pass --resplit to redo the train/val split, or --force to re-download.")
         return
 
     print(f"Downloading {DATASET} via kagglehub...")
@@ -122,8 +159,9 @@ def main() -> None:
         shutil.rmtree(dest)
     shutil.copytree(source, dest)
 
-    rebuild_validation(dest, val_fraction=args.val_fraction)
+    rebuild_validation(dest, val_fraction=args.val_fraction, seed=args.seed)
     print_counts(dest)
+    check_no_leakage(dest)
     print(f"Done. Data ready at {dest.resolve()}")
 
 

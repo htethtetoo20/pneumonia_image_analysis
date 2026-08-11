@@ -1,5 +1,6 @@
 # Data and artifacts (large / generated)
 data/chest_xray/
+data/chest_xray_subtype/
 data/**/*.jpeg
 data/**/*.jpg
 data/**/*.png
