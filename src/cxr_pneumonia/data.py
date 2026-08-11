@@ -92,10 +92,13 @@ def create_dataloaders(cfg: Config) -> dict[str, DataLoader]:
             "in that same order."
         )
 
+    # Balance either here or in the loss, not both -- see Config.imbalance.
+    sampler = make_weighted_sampler(train_ds) if cfg.use_sampler else None
     train_loader = DataLoader(
         train_ds,
         batch_size=cfg.batch_size,
-        sampler=make_weighted_sampler(train_ds),
+        sampler=sampler,
+        shuffle=sampler is None,
         num_workers=cfg.num_workers,
         pin_memory=torch.cuda.is_available(),
     )

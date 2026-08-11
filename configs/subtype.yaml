@@ -16,6 +16,11 @@ weight_decay: 0.0001
 patience: 5
 freeze_backbone: false
 
+# One imbalance correction, not two. "both" (the old implicit behaviour)
+# balanced the batches *and* weighted the loss, roughly squaring the boost the
+# minority classes got.
+imbalance: sampler
+
 num_classes: 3
 # Must match ImageFolder's alphabetical ordering of the class folders.
 class_names:

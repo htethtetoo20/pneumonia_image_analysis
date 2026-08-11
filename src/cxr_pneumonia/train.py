@@ -42,11 +42,7 @@ def run_epoch_eval(
     device: torch.device,
     num_classes: int = 2,
 ) -> dict:
-    """
-    Validation pass. Uses macro-averaged F1 and one-vs-rest AUC beyond two
-    classes so a rare class counts as much as a common one -- the checkpoint
-    selection in train() reads f1 from here.
-    """
+    """Validation pass; macro F1/AUC beyond two classes. train() reads f1 from here for checkpoint selection."""
     model.eval()
     total_loss = 0.0
     all_labels: list[int] = []
@@ -119,7 +115,11 @@ def train(cfg: Config) -> Path:
 
     loaders = create_dataloaders(cfg)
     train_ds = loaders["train"].dataset
-    weights = class_weights_from_dataset(train_ds).to(device)
+
+    # The sampler in create_dataloaders may already be balancing batches; adding
+    # inverse-frequency loss weights on top of that squares the correction.
+    weights = class_weights_from_dataset(train_ds).to(device) if cfg.use_class_weights else None
+    print(f"Imbalance handling: {cfg.imbalance}")
 
     model = build_model(num_classes=cfg.num_classes, freeze_backbone=cfg.freeze_backbone).to(device)
     criterion = nn.CrossEntropyLoss(weight=weights)
