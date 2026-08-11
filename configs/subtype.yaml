@@ -1,0 +1,24 @@
+# 3-class sub-type task: Normal vs Bacterial vs Viral pneumonia.
+# Build the data first: python scripts/build_subtype_dataset.py
+seed: 42
+data_dir: data/chest_xray_subtype
+artifacts_dir: artifacts/subtype
+
+image_size: 224
+batch_size: 32
+num_workers: 4
+
+# Bacterial-vs-viral is a subtler boundary than normal-vs-abnormal, so give it
+# more epochs and more patience than the binary baseline.
+epochs: 20
+learning_rate: 0.0001
+weight_decay: 0.0001
+patience: 5
+freeze_backbone: false
+
+num_classes: 3
+# Must match ImageFolder's alphabetical ordering of the class folders.
+class_names:
+  - BACTERIAL
+  - NORMAL
+  - VIRAL
