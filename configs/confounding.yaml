@@ -1,0 +1,32 @@
+# 5-class task: Normal / Bacterial / Viral / COVID-19 / Tuberculosis.
+#
+# The classes come from three different hospitals and two different age groups
+# (see scripts/build_confounding_dataset.py), so disease label and data source
+# are almost perfectly correlated. Whatever accuracy this reaches must be read
+# against configs/confounding_source.yaml, which trains on the same images
+# labelled by SOURCE instead of disease. Treat a high number here as a finding
+# to explain, not a result to report.
+seed: 42
+data_dir: data/confounding
+artifacts_dir: artifacts/confounding
+
+image_size: 224
+batch_size: 32
+num_workers: 4
+
+epochs: 15
+learning_rate: 0.0001
+weight_decay: 0.0001
+patience: 4
+freeze_backbone: false
+
+imbalance: sampler
+
+num_classes: 5
+# ImageFolder sorts alphabetically.
+class_names:
+  - BACTERIAL
+  - COVID
+  - NORMAL
+  - TUBERCULOSIS
+  - VIRAL

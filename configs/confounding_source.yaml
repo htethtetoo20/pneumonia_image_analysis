@@ -1,0 +1,26 @@
+# Control experiment: predict which DATASET an image came from, not its disease.
+#
+# Same images as configs/confounding.yaml, relabelled. If this scores as high
+# as the 5-class disease model, the disease model's accuracy is not evidence
+# that it reads pathology -- provenance alone explains it.
+seed: 42
+data_dir: data/confounding_source
+artifacts_dir: artifacts/confounding_source
+
+image_size: 224
+batch_size: 32
+num_workers: 4
+
+epochs: 15
+learning_rate: 0.0001
+weight_decay: 0.0001
+patience: 4
+freeze_backbone: false
+
+imbalance: sampler
+
+num_classes: 3
+class_names:
+  - KERMANY_PEDIATRIC
+  - QATAR_COVID
+  - QATAR_TB
