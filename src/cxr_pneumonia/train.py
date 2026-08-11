@@ -35,12 +35,23 @@ def get_device() -> torch.device:
 
 
 @torch.no_grad()
-def run_epoch_eval(model: nn.Module, loader: DataLoader, criterion: nn.Module, device: torch.device) -> dict:
+def run_epoch_eval(
+    model: nn.Module,
+    loader: DataLoader,
+    criterion: nn.Module,
+    device: torch.device,
+    num_classes: int = 2,
+) -> dict:
+    """
+    Validation pass. Uses macro-averaged F1 and one-vs-rest AUC beyond two
+    classes so a rare class counts as much as a common one -- the checkpoint
+    selection in train() reads f1 from here.
+    """
     model.eval()
     total_loss = 0.0
     all_labels: list[int] = []
     all_preds: list[int] = []
-    all_probs: list[float] = []
+    all_probs: list[list[float]] = []
 
     for images, labels in loader:
         images = images.to(device)
@@ -49,7 +60,7 @@ def run_epoch_eval(model: nn.Module, loader: DataLoader, criterion: nn.Module, d
         loss = criterion(logits, labels)
         total_loss += loss.item() * images.size(0)
 
-        probs = torch.softmax(logits, dim=1)[:, 1]
+        probs = torch.softmax(logits, dim=1)
         preds = logits.argmax(dim=1)
         all_labels.extend(labels.cpu().tolist())
         all_preds.extend(preds.cpu().tolist())
@@ -57,9 +68,16 @@ def run_epoch_eval(model: nn.Module, loader: DataLoader, criterion: nn.Module, d
 
     n = len(all_labels)
     acc = sum(int(y == p) for y, p in zip(all_labels, all_preds)) / max(n, 1)
-    f1 = f1_score(all_labels, all_preds, zero_division=0)
+    f1 = f1_score(all_labels, all_preds, average="binary" if num_classes == 2 else "macro", zero_division=0)
+
+    prob_array = np.asarray(all_probs)
     try:
-        auc = roc_auc_score(all_labels, all_probs) if len(set(all_labels)) > 1 else float("nan")
+        if len(set(all_labels)) < num_classes:
+            auc = float("nan")
+        elif num_classes == 2:
+            auc = roc_auc_score(all_labels, prob_array[:, 1])
+        else:
+            auc = roc_auc_score(all_labels, prob_array, multi_class="ovr", average="macro")
     except ValueError:
         auc = float("nan")
 
@@ -125,7 +143,7 @@ def train(cfg: Config) -> Path:
 
         for epoch in range(1, cfg.epochs + 1):
             train_loss = train_one_epoch(model, loaders["train"], criterion, optimizer, device)
-            val_metrics = run_epoch_eval(model, loaders["val"], criterion, device)
+            val_metrics = run_epoch_eval(model, loaders["val"], criterion, device, cfg.num_classes)
             row = {
                 "epoch": epoch,
                 "train_loss": train_loss,

@@ -82,10 +82,15 @@ def create_dataloaders(cfg: Config) -> dict[str, DataLoader]:
     val_ds = build_dataset(cfg.data_path, "val", cfg.image_size, train=False)
     test_ds = build_dataset(cfg.data_path, "test", cfg.image_size, train=False)
 
-    # Align class order with config when possible
-    if list(train_ds.classes) != cfg.class_names:
-        # ImageFolder sorts alphabetically; NORMAL < PNEUMONIA — matches default
-        pass
+    # ImageFolder assigns label indices by sorting the class folders
+    # alphabetically. If cfg.class_names is in any other order, every metric and
+    # Grad-CAM title downstream is silently mislabelled, so fail loudly instead.
+    if list(train_ds.classes) != list(cfg.class_names):
+        raise ValueError(
+            f"class_names {cfg.class_names} does not match the folders found on disk "
+            f"{train_ds.classes}. ImageFolder sorts alphabetically — list class_names "
+            "in that same order."
+        )
 
     train_loader = DataLoader(
         train_ds,
