@@ -20,6 +20,14 @@ def main() -> None:
     parser.add_argument("--epochs", type=int, default=None)
     parser.add_argument("--batch-size", type=int, default=None)
     parser.add_argument("--data-dir", type=str, default=None)
+    parser.add_argument("--seed", type=int, default=None)
+    parser.add_argument("--artifacts-dir", type=str, default=None)
+    parser.add_argument(
+        "--imbalance",
+        choices=["sampler", "class_weight", "both", "none"],
+        default=None,
+        help="Override the config's imbalance handling",
+    )
     args = parser.parse_args()
 
     cfg = load_config(
@@ -27,6 +35,9 @@ def main() -> None:
         epochs=args.epochs,
         batch_size=args.batch_size,
         data_dir=args.data_dir,
+        seed=args.seed,
+        artifacts_dir=args.artifacts_dir,
+        imbalance=args.imbalance,
     )
     best = train(cfg)
     print(f"Best checkpoint: {best}")
