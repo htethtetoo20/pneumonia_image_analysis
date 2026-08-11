@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -17,10 +18,13 @@ from cxr_pneumonia.explain import predict_with_gradcam
 
 st.set_page_config(page_title="CXR Pneumonia Detector", layout="wide")
 
+# Point CXR_CONFIG at configs/subtype.yaml to serve the 3-class model instead.
+CONFIG_PATH = Path(os.environ.get("CXR_CONFIG", ROOT / "configs" / "default.yaml"))
+
 
 @st.cache_resource
-def get_cfg_and_checkpoint():
-    cfg = load_config(ROOT / "configs" / "default.yaml")
+def get_cfg_and_checkpoint(config_path: str):
+    cfg = load_config(config_path)
     cfg.data_dir = str((ROOT / cfg.data_dir).resolve())
     cfg.artifacts_dir = str((ROOT / cfg.artifacts_dir).resolve())
     ckpt = cfg.artifacts_path / "best.pt"
@@ -28,14 +32,16 @@ def get_cfg_and_checkpoint():
 
 
 def main() -> None:
-    st.title("Chest X-Ray Pneumonia Detector")
-    st.caption("Upload a chest X-ray to get a Normal / Pneumonia prediction and a Grad-CAM explanation.")
+    cfg, ckpt = get_cfg_and_checkpoint(str(CONFIG_PATH))
+    classes = " / ".join(name.title() for name in cfg.class_names)
 
-    cfg, ckpt = get_cfg_and_checkpoint()
+    st.title("Chest X-Ray Pneumonia Detector")
+    st.caption(f"Upload a chest X-ray to get a {classes} prediction and a Grad-CAM explanation.")
+
     if not ckpt.exists():
         st.error(
             f"Missing trained model at `{ckpt}`. "
-            "Run `python scripts/train.py --config configs/default.yaml` first."
+            f"Run `python scripts/train.py --config {CONFIG_PATH.name}` first."
         )
         st.stop()
 
@@ -51,8 +57,10 @@ def main() -> None:
         st.info("Upload an image to run detection.")
         with col_left:
             st.subheader("Example from test set")
-            sample_dir = Path(cfg.data_dir) / "test" / "PNEUMONIA"
-            samples = sorted(sample_dir.glob("*.jpeg"))[:1]
+            # First abnormal class folder, whichever task this config describes.
+            abnormal = next((c for c in cfg.class_names if c != "NORMAL"), cfg.class_names[0])
+            sample_dir = Path(cfg.data_dir) / "test" / abnormal
+            samples = sorted(p for p in sample_dir.glob("*") if p.suffix.lower() in {".jpeg", ".jpg", ".png"})[:1]
             if samples:
                 st.image(str(samples[0]), caption=samples[0].name, use_container_width=True)
                 if st.button("Analyze this example"):
@@ -78,10 +86,10 @@ def main() -> None:
         st.subheader("Prediction")
         label = result["pred_name"]
         prob = result["prob"]
-        if label == "PNEUMONIA":
-            st.error(f"**{label}** — confidence {prob:.1%}")
-        else:
+        if label == "NORMAL":
             st.success(f"**{label}** — confidence {prob:.1%}")
+        else:
+            st.error(f"**{label}** — confidence {prob:.1%}")
 
         st.write("Class probabilities")
         for name, p in result["probs"].items():
