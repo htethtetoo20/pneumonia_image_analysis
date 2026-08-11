@@ -58,14 +58,7 @@ def collect_predictions(
 
 
 def compute_metrics(y_true: np.ndarray, y_pred: np.ndarray, y_prob: np.ndarray, class_names: list[str]) -> dict:
-    """
-    Metrics for either a binary or a multi-class run.
-
-    Binary keeps its positive-class precision/recall/f1 so the two-class
-    baseline stays comparable; multi-class switches to macro averages, which
-    weight a rare class (VIRAL) the same as a common one (BACTERIAL) instead of
-    letting the majority class carry the score.
-    """
+    """Metrics for a binary or multi-class run (multi-class uses macro averages so a rare class like VIRAL counts as much as a common one)."""
     n_classes = len(class_names)
     average = "binary" if n_classes == 2 else "macro"
     all_classes_present = len(np.unique(y_true)) == n_classes
@@ -98,6 +91,51 @@ def compute_metrics(y_true: np.ndarray, y_pred: np.ndarray, y_prob: np.ndarray, 
     if per_class_auc is not None:
         metrics["roc_auc_per_class"] = per_class_auc
     return metrics
+
+
+def bootstrap_ci(
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    y_prob: np.ndarray,
+    class_names: list[str],
+    n_resamples: int = 1000,
+    alpha: float = 0.05,
+    seed: int = 42,
+) -> dict:
+    """
+    Percentile bootstrap 95% CIs for the headline metrics.
+
+    A single test-set score hides how much is sampling luck on a small test set;
+    resampling predictions with replacement estimates that band without retraining.
+    """
+    rng = np.random.default_rng(seed)
+    n_classes = len(class_names)
+    average = "binary" if n_classes == 2 else "macro"
+    n = len(y_true)
+
+    draws: dict[str, list[float]] = {k: [] for k in ("accuracy", "precision", "recall", "f1", "roc_auc")}
+    for _ in range(n_resamples):
+        idx = rng.integers(0, n, n)
+        true_s, pred_s, prob_s = y_true[idx], y_pred[idx], y_prob[idx]
+
+        draws["accuracy"].append(accuracy_score(true_s, pred_s))
+        draws["precision"].append(precision_score(true_s, pred_s, average=average, zero_division=0))
+        draws["recall"].append(recall_score(true_s, pred_s, average=average, zero_division=0))
+        draws["f1"].append(f1_score(true_s, pred_s, average=average, zero_division=0))
+
+        if len(np.unique(true_s)) < n_classes:
+            continue
+        if n_classes == 2:
+            draws["roc_auc"].append(roc_auc_score(true_s, prob_s[:, 1]))
+        else:
+            draws["roc_auc"].append(roc_auc_score(true_s, prob_s, multi_class="ovr", average="macro"))
+
+    lo_pct, hi_pct = 100 * alpha / 2, 100 * (1 - alpha / 2)
+    return {
+        metric: [float(np.percentile(values, lo_pct)), float(np.percentile(values, hi_pct))]
+        for metric, values in draws.items()
+        if values
+    }
 
 
 def plot_confusion_matrix(cm: np.ndarray, class_names: list[str], out_path: Path) -> None:
@@ -146,6 +184,7 @@ def evaluate(cfg: Config, checkpoint: str | Path, split: str = "test") -> dict:
 
     y_true, y_pred, y_prob = collect_predictions(model, loaders[split], device)
     metrics = compute_metrics(y_true, y_pred, y_prob, cfg.class_names)
+    metrics["ci_95"] = bootstrap_ci(y_true, y_pred, y_prob, cfg.class_names, seed=cfg.seed)
 
     cm_path = cfg.artifacts_path / f"confusion_matrix_{split}.png"
     roc_path = cfg.artifacts_path / f"roc_{split}.png"
@@ -158,8 +197,15 @@ def evaluate(cfg: Config, checkpoint: str | Path, split: str = "test") -> dict:
     with open(metrics_path, "w", encoding="utf-8") as f:
         json.dump(metrics, f, indent=2)
 
-    summary_keys = ["accuracy", "precision", "recall", "f1", "roc_auc", "roc_auc_per_class"]
-    print(json.dumps({k: metrics[k] for k in summary_keys if k in metrics}, indent=2))
+    ci = metrics["ci_95"]
+    for name in ("accuracy", "precision", "recall", "f1", "roc_auc"):
+        value = metrics[name]
+        if value is None:
+            continue
+        bounds = f"  95% CI [{ci[name][0]:.3f}, {ci[name][1]:.3f}]" if name in ci else ""
+        print(f"  {name:<10} {value:.4f}{bounds}")
+    for name, value in (metrics.get("roc_auc_per_class") or {}).items():
+        print(f"  AUC {name:<8} {value:.4f}")
     print(f"Wrote {metrics_path}")
     print(f"Wrote {cm_path}")
     return metrics
