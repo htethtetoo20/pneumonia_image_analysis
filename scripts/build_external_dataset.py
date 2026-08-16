@@ -14,7 +14,7 @@ Class mapping:  Normal -> NORMAL,  Viral Pneumonia -> PNEUMONIA
 "Lung_Opacity" is excluded by default -- it's documented as non-COVID lung
 infection (broader than pneumonia), which would make disagreements ambiguous.
 Pass --include-lung-opacity to add it anyway. COVID images are excluded too;
-see confounding_study.py for that extension.
+see build_confounding_dataset.py for that extension.
 
     python scripts/build_external_dataset.py
 """
@@ -64,12 +64,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--dest", type=Path, default=ROOT / "data" / "external")
     parser.add_argument(
-        "--balanced",
-        action="store_true",
-        default=True,
-        help="Subsample the larger class so the test set is balanced (default)",
+        "--no-balanced",
+        dest="balanced",
+        action="store_false",
+        help="Keep the natural class ratio; by default the larger class is subsampled to balance it",
     )
-    parser.add_argument("--no-balanced", dest="balanced", action="store_false")
     parser.add_argument("--include-lung-opacity", action="store_true")
     parser.add_argument("--seed", type=int, default=42, help="Seed for subsampling")
     parser.add_argument("--copy", action="store_true", help="Copy instead of hardlinking")

@@ -24,7 +24,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from cxr_pneumonia.config import Config
-from cxr_pneumonia.data import create_dataloaders
+from cxr_pneumonia.data import build_dataset
 from cxr_pneumonia.model import load_checkpoint
 from cxr_pneumonia.train import get_device
 
@@ -178,11 +178,26 @@ def evaluate(cfg: Config, checkpoint: str | Path, split: str = "test") -> dict:
     cfg.artifacts_path.mkdir(parents=True, exist_ok=True)
 
     model = load_checkpoint(str(checkpoint), device, num_classes=cfg.num_classes)
-    loaders = create_dataloaders(cfg)
-    if split not in loaders:
-        raise ValueError(f"Unknown split '{split}'. Expected one of {list(loaders)}")
 
-    y_true, y_pred, y_prob = collect_predictions(model, loaders[split], device)
+    # Build the loader here rather than via create_dataloaders: that one gives
+    # train augmentation and a resampling sampler, which would score the train
+    # split on augmented duplicates of ~58% of the images. Evaluation always
+    # wants the full split, in order, untransformed.
+    dataset = build_dataset(cfg.data_path, split, cfg.image_size, train=False)
+    if list(dataset.classes) != list(cfg.class_names):
+        raise ValueError(
+            f"class_names {cfg.class_names} does not match the folders in the '{split}' split "
+            f"{dataset.classes}. ImageFolder sorts alphabetically — list class_names in that order."
+        )
+    loader = DataLoader(
+        dataset,
+        batch_size=cfg.batch_size,
+        shuffle=False,
+        num_workers=cfg.num_workers,
+        pin_memory=torch.cuda.is_available(),
+    )
+
+    y_true, y_pred, y_prob = collect_predictions(model, loader, device)
     metrics = compute_metrics(y_true, y_pred, y_prob, cfg.class_names)
     metrics["ci_95"] = bootstrap_ci(y_true, y_pred, y_prob, cfg.class_names, seed=cfg.seed)
 

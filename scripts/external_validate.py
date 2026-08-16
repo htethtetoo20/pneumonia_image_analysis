@@ -58,7 +58,14 @@ def operating_point_analysis(y_true: np.ndarray, p_pneumonia: np.ndarray) -> dic
 
 
 def collapse_to_binary(probs: np.ndarray, class_names: list[str]) -> np.ndarray:
-    """Sum multi-class probabilities into NORMAL vs PNEUMONIA so a 3-class model scores against binary ground truth."""
+    """
+    Fold multi-class probabilities into NORMAL vs PNEUMONIA for binary ground truth.
+
+    Everything that is not NORMAL counts as PNEUMONIA. For the 3-class subtype
+    model that is exactly BACTERIAL u VIRAL; for a 5-class checkpoint it also
+    absorbs COVID and TUBERCULOSIS, which the external set does not contain.
+    so those runs measure "abnormal vs normal", not pneumonia specifically.
+    """
     normal_idx = [i for i, n in enumerate(class_names) if n == "NORMAL"]
     if not normal_idx:
         raise ValueError(f"No NORMAL class in {class_names}; cannot collapse to binary.")
